@@ -7,9 +7,11 @@ existing `aw-app-browser` container over CDP** (`aw-app-browser:9223`) — so
 the browser the user sees (noVNC :7900) and the browser the agent controls are
 the SAME instance.
 
-Uses only stdlib + `websockets` (the workspace has no Playwright). Chrome's
-CDP HTTP/WS endpoints reject a non-IP/localhost Host header, so we always
-connect by the container's resolved IP.
+No hard dependency on CDP being up: `ensure_browser()` starts the container if
+it's stopped, waits for CDP, and creates a page target if none exists — so a
+caller can pilot even when the browser isn't active. Uses only stdlib +
+`websockets` + the `docker` SDK (both present in the workspace). Chrome's CDP
+endpoints reject a non-IP/localhost Host header, so we connect by resolved IP.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import socket
 import urllib.request
 
@@ -24,6 +27,7 @@ import websockets
 
 CDP_HOST = "aw-app-browser"
 CDP_PORT = 9223
+CONTAINER = "aw-app-browser"
 
 # windowsVirtualKeyCode for the handful of named keys we dispatch.
 _VK = {"Enter": 13, "Tab": 9, "Escape": 27, "Backspace": 8,
@@ -31,14 +35,36 @@ _VK = {"Enter": 13, "Tab": 9, "Escape": 27, "Backspace": 8,
        "PageDown": 34, "PageUp": 33}
 
 
-def _page_ws_url() -> str:
-    """Resolve the container IP and return the first page target's WS URL,
-    rewritten to use the IP (Chrome validates the Host header)."""
-    ip = socket.gethostbyname(CDP_HOST)
-    targets = json.load(urllib.request.urlopen(f"http://{ip}:{CDP_PORT}/json", timeout=6))
-    page = next(t for t in targets if t.get("type") == "page")
-    tail = page["webSocketDebuggerUrl"].split(str(CDP_PORT), 1)[1]
-    return f"ws://{ip}:{CDP_PORT}{tail}"
+def _http_json(ip: str, path: str):
+    with urllib.request.urlopen(f"http://{ip}:{CDP_PORT}{path}", timeout=5) as r:
+        body = r.read().decode()
+    return json.loads(body) if body.strip().startswith(("{", "[")) else body
+
+
+def _start_container() -> None:
+    """Best-effort: start the aw-app-browser container if it's stopped.
+
+    The workspace process reaches the host's rootless podman over the Docker
+    API (same mechanism the runtime's ContainerSupervisor uses). If the SDK or
+    socket isn't available, do nothing — the CDP poll will just time out with a
+    clear error.
+    """
+    try:
+        import docker
+    except Exception:
+        return
+    sock = os.environ.get("DOCKER_HOST") or os.environ.get("AW_PODMAN_SOCKET")
+    try:
+        if sock:
+            base = sock if "://" in sock else "unix://" + sock
+            client = docker.DockerClient(base_url=base)
+        else:
+            client = docker.from_env()
+        c = client.containers.get(CONTAINER)
+        if c.status != "running":
+            c.start()
+    except Exception:
+        pass
 
 
 class CDPClient:
@@ -55,10 +81,38 @@ class CDPClient:
         self._reader: asyncio.Task | None = None
         self.events: asyncio.Queue = asyncio.Queue(maxsize=4)
 
+    async def ensure_browser(self, timeout: float = 30.0) -> str:
+        """Guarantee a reachable CDP page target — starting the container and
+        creating a page if needed — and return its websocket URL. Does NOT
+        depend on the browser already being active."""
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        started = False
+        while True:
+            try:
+                ip = await loop.run_in_executor(None, socket.gethostbyname, CDP_HOST)
+                targets = await loop.run_in_executor(None, _http_json, ip, "/json")
+                pages = [t for t in targets if t.get("type") == "page"]
+                if not pages:
+                    await loop.run_in_executor(None, _http_json, ip, "/json/new?about:blank")
+                    await asyncio.sleep(0.4)
+                    continue
+                tail = pages[0]["webSocketDebuggerUrl"].split(str(CDP_PORT), 1)[1]
+                return f"ws://{ip}:{CDP_PORT}{tail}"
+            except Exception:
+                if not started:
+                    await loop.run_in_executor(None, _start_container)
+                    started = True
+                if loop.time() >= deadline:
+                    raise RuntimeError(
+                        "aw-app-browser not reachable over CDP (:9223) and could "
+                        "not be started")
+                await asyncio.sleep(1.0)
+
     async def _ensure(self) -> None:
         if self._ws is not None:
             return
-        uri = _page_ws_url()
+        uri = await self.ensure_browser()
         self._ws = await websockets.connect(uri, max_size=None, ping_interval=None)
         self._pending = {}
         self.events = asyncio.Queue(maxsize=4)
