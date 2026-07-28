@@ -2,8 +2,8 @@
   "manifest_version": 1,
   "id": "devctl",
   "name": "DevCtl",
-  "version": "0.1.0",
-  "description": "Dev-control panel for the workspace. Scaffold only: contributes a card in the Apps grid + a default window with a stub UI. First intended capability (NOT implemented yet, see README): observe/control the user's browser by reusing the CDP endpoint already exposed by the aw-app-browser container (in-workspace as aw-app-browser:9223) — live screenshot + navigation.",
+  "version": "0.2.0",
+  "description": "Dev-control panel for the workspace — a piloted browser. Observes and controls the aw-app-browser container over CDP (aw-app-browser:9223): live screenshot, screencast over a WebSocket, navigate, click/type/key/scroll, and evaluate/inject JS (DOM control). Ported from the monolith whiteboard piloted-browser. Backend routes under /api/apps/devctl (use via API for now; an MCP-gateway tool wrapper comes later).",
   "tier": "inprocess",
   "publisher": "TekFlox",
   "resource_estimate": { "cpu": "low", "memory": "low", "disk": "low" },
@@ -11,7 +11,7 @@
   "runtime": {
     "python": ">=3.11",
     "entrypoint": "devctl_app.plugin:DevctlAppPlugin",
-    "pip_requires": []
+    "pip_requires": ["websockets>=11"]
   },
 
   "permissions": [

@@ -6,7 +6,7 @@
       "widgets": [
         {
           "type": "markdown",
-          "value": "## DevCtl\nScaffold only — no capability implemented yet.\n\nFirst planned capability: observe/control the user's browser by reusing the CDP endpoint already exposed by the `aw-app-browser` container (in-workspace `aw-app-browser:9223`) — live screenshot + navigation.\n\nStub endpoint: `GET /api/apps/devctl/browser/screenshot` (returns 501 for now). See the repo README."
+          "value": "## DevCtl — piloted browser\nControla e observa o **aw-app-browser** via CDP (`aw-app-browser:9223`). Mesmo browser que você vê no noVNC.\n\n**API** (base `/api/apps/devctl`):\n- `GET /browser/screenshot` — PNG ao vivo\n- `GET /browser/current` — `{title,url}`\n- `POST /browser/navigate` `{url}`\n- `POST /browser/eval` `{js}` — roda JS, retorna valor (controla o DOM)\n- `POST /browser/inject` `{js}` — injeta script (agora + a cada load)\n- `POST /browser/click` `{x,y,double}`\n- `POST /browser/type` `{text,submit}`\n- `POST /browser/key` `{key}`\n- `POST /browser/scroll` `{dy}`\n- `WS /ws` — screencast (frames JPEG base64)\n\nMCP-gateway wrapper: em breve."
         }
       ]
     }
