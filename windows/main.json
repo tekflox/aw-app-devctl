@@ -1,0 +1,14 @@
+{
+  "layout": "stack",
+  "regions": [
+    {
+      "id": "main",
+      "widgets": [
+        {
+          "type": "markdown",
+          "value": "## DevCtl\nScaffold only — no capability implemented yet.\n\nFirst planned capability: observe/control the user's browser by reusing the CDP endpoint already exposed by the `aw-app-browser` container (in-workspace `aw-app-browser:9223`) — live screenshot + navigation.\n\nStub endpoint: `GET /api/apps/devctl/browser/screenshot` (returns 501 for now). See the repo README."
+        }
+      ]
+    }
+  ]
+}

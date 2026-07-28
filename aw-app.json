@@ -1,0 +1,39 @@
+{
+  "manifest_version": 1,
+  "id": "devctl",
+  "name": "DevCtl",
+  "version": "0.1.0",
+  "description": "Dev-control panel for the workspace. Scaffold only: contributes a card in the Apps grid + a default window with a stub UI. First intended capability (NOT implemented yet, see README): observe/control the user's browser by reusing the CDP endpoint already exposed by the aw-app-browser container (in-workspace as aw-app-browser:9223) — live screenshot + navigation.",
+  "tier": "inprocess",
+  "publisher": "TekFlox",
+  "resource_estimate": { "cpu": "low", "memory": "low", "disk": "low" },
+
+  "runtime": {
+    "python": ">=3.11",
+    "entrypoint": "devctl_app.plugin:DevctlAppPlugin",
+    "pip_requires": []
+  },
+
+  "permissions": [
+    "routes:register"
+  ],
+
+  "contributes": {
+    "routes": [
+      { "prefix": "/api/apps/devctl" }
+    ],
+    "windows": [
+      { "id": "devctl.main", "title": "DevCtl",
+        "body": { "type": "declarative", "spec": "windows/main.json" } }
+    ]
+  },
+
+  "config_schema": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  },
+
+  "dependencies": {},
+  "migrations": {}
+}
