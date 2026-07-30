@@ -1,8 +1,7 @@
 # aw-app-devctl
 
-Decoupled app for aw-workspace, per the
-[Decoupled Apps Framework ADR](../../docs/knowledge_base/docs/architecture/decoupled-apps-framework.md)
-(`aw-app.json` manifest schema v1). **Scaffold only** — see Status below.
+AW workspace app for development control panels. **Scaffold only** — see
+Status below.
 
 ## Vision
 
@@ -50,7 +49,7 @@ against that same CDP endpoint, not to run its own browser.
 
 ## Why no Workspace nav
 
-`aw-app-browser`'s own history flagged that a decoupled app should NOT
+`aw-app-browser`'s own history flagged that this kind of app should not
 register itself into `core.nav.workspace` — it belongs in the Apps grid,
 not the Workspace menu. This manifest follows that: `contributes` has
 `windows` but no `nav` entry, matching `aw-app-browser`'s manifest shape
