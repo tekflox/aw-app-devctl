@@ -3,16 +3,17 @@
   "id": "devctl",
   "name": "DevCtl",
   "version": "0.3.0",
-  "description": "Dev-control panel for the workspace: (1) a piloted browser — observes and controls the aw-app-browser container over CDP (aw-app-browser:9223), live screenshot, screencast over a WebSocket, navigate, click/type/key/scroll, evaluate/inject JS; (2) a tab relay — remote JS eval into the USER's OWN live browser tab (moved from the aw-workspace monolith, ADR \"Apps Own Their Front + Back Routes\" Decision 5), with a [dev] top-nav toggle and an agent-driven local /eval + /tabs escape hatch. Runs standalone too (Decision 4). Backend routes under /api/apps/devctl (use via API for now; an MCP-gateway tool wrapper comes later).",
+  "description": "Dev-control panel for the workspace: (1) a piloted browser — observes and controls the aw-app-browser container over CDP (aw-app-browser:9223), live screenshot, screencast over a WebSocket, navigate, click/type/key/scroll, evaluate/inject JS; (2) a tab relay — remote JS eval into the USER's OWN live browser tab (moved from the aw-workspace monolith, ADR \"Apps Own Their Front + Back Routes\" Decision 5), with a [dev] top-nav toggle and an agent-driven local /eval + /tabs escape hatch. Runs standalone too (Decision 4). Backend routes under /api/apps/devctl; a devctl-browser MCP tool wrapper (piloted-browser navigate/click/type/eval/screenshot) is contributed for agents via mcp.json.",
   "tier": "inprocess",
   "requires_ui_refresh": true,
+  "category": "Tools",
   "publisher": "TekFlox",
   "resource_estimate": { "cpu": "low", "memory": "low", "disk": "low" },
 
   "runtime": {
     "python": ">=3.11",
     "entrypoint": "devctl_app.plugin:DevctlAppPlugin",
-    "pip_requires": ["websockets>=11"],
+    "pip_requires": ["websockets>=11", "mcp>=1.2"],
     "standalone": {
       "module": "devctl_app",
       "default_port": 9300
@@ -37,6 +38,9 @@
     "frontend": {
       "mode": "component",
       "bundle": "ui/dist/devctl.js"
+    },
+    "mcp": {
+      "reload_on_save": true
     }
   },
 

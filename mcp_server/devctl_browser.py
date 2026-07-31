@@ -6,12 +6,17 @@ evaluate/inject JS (DOM control), and screenshot. No dependency on the browser
 being active — every call goes through `ensure_browser()`, which starts the
 container and opens a page if needed.
 
-Registration: this is meant to run under the **aw-workspace mcp-gateway**
-(same python env, so `devctl_app.cdp` imports cleanly). That gateway isn't
-wired inside aw-workspace yet — until then, drive the browser via the HTTP API
-(`/api/apps/devctl/browser/*`). Ships here so it's ready to register.
+Registration: wired into the aw-workspace mcp-gateway via this app's
+``mcp.json`` (``contributes.mcp`` in ``aw-app.json`` signals it). The gateway
+spawns this with ``cwd`` set to the app root so `devctl_app.cdp` imports
+cleanly.
 
-Run: `python -m mcp.devctl_browser` (stdio).
+Note: this package is named ``mcp_server`` (not ``mcp``) specifically to
+avoid shadowing the installed ``mcp`` SDK package (FastMCP) — a directory
+named ``mcp`` next to this file would resolve first on ``sys.path`` and
+break the `from mcp.server.fastmcp import FastMCP` import below.
+
+Run: `python -m mcp_server.devctl_browser` (stdio).
 """
 
 from __future__ import annotations
