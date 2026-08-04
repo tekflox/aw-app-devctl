@@ -23,8 +23,6 @@ import os
 import socket
 import urllib.request
 
-import websockets
-
 CDP_HOST = "aw-app-browser"
 CDP_PORT = 9223
 CONTAINER = "aw-app-browser"
@@ -112,6 +110,8 @@ class CDPClient:
     async def _ensure(self) -> None:
         if self._ws is not None:
             return
+        import websockets
+
         uri = await self.ensure_browser()
         self._ws = await websockets.connect(uri, max_size=None, ping_interval=None)
         self._pending = {}
@@ -140,6 +140,8 @@ class CDPClient:
             self._ws = None  # force reconnect next send
 
     async def send(self, method: str, params: dict | None = None, timeout: float = 30.0) -> dict:
+        import websockets
+
         last_exc: Exception | None = None
         for attempt in (1, 2):  # one reconnect retry
             try:
