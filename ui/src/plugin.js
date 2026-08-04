@@ -37,7 +37,9 @@ export function register(host) {
       {
         type: 'button',
         onClick: () => (enabled ? client.disable() : client.enable()),
-        title: `Remote dev channel — ${enabled ? 'enabled, ' + state : 'disabled'}`,
+        title: enabled
+          ? `Remote dev channel — enabled, ${state}. Turn it off to stop.`
+          : 'Turn it on and ask the agent to interact with your UI',
         style: {
           color, background: 'transparent', border: 'none', cursor: 'pointer',
           fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em',

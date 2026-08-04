@@ -32,11 +32,11 @@ function f(e, n) {
   if (Array.isArray(e)) return e.slice(0, 100).map((t) => f(t, n + 1));
   try {
     const t = {}, a = Object.keys(e).slice(0, 100);
-    for (const o of a)
+    for (const c of a)
       try {
-        t[o] = f(e[o], n + 1);
+        t[c] = f(e[c], n + 1);
       } catch (i) {
-        t[o] = "[err:" + i.message + "]";
+        t[c] = "[err:" + i.message + "]";
       }
     return t;
   } catch {
@@ -54,17 +54,17 @@ async function h(e) {
   }
 }
 function E({ wsUrl: e }) {
-  let n = !1, r = null, t = 1e3, a = null, o = "closed";
+  let n = !1, r = null, t = 1e3, a = null, c = "closed";
   const i = /* @__PURE__ */ new Set();
   function l() {
-    for (const c of i)
+    for (const o of i)
       try {
-        c({ enabled: p(), state: o });
+        o({ enabled: p(), state: c });
       } catch {
       }
   }
-  function s(c) {
-    o = c === "hello" ? "open" : c, l();
+  function s(o) {
+    c = o === "hello" ? "open" : o, l();
   }
   function d() {
     s("connecting");
@@ -76,10 +76,10 @@ function E({ wsUrl: e }) {
     }
     r.addEventListener("open", () => {
       s("open"), t = 1e3;
-    }), r.addEventListener("message", async (c) => {
+    }), r.addEventListener("message", async (o) => {
       let u;
       try {
-        u = JSON.parse(c.data);
+        u = JSON.parse(o.data);
       } catch {
         return;
       }
@@ -88,9 +88,9 @@ function E({ wsUrl: e }) {
         return;
       }
       if (u.cmd === "eval") {
-        const w = await h(u.code || "");
+        const b = await h(u.code || "");
         try {
-          r.send(JSON.stringify({ id: u.id, ...w }));
+          r.send(JSON.stringify({ id: u.id, ...b }));
         } catch {
         }
       }
@@ -108,8 +108,8 @@ function E({ wsUrl: e }) {
   function g() {
     if (n) return;
     n = !0;
-    const c = () => d();
-    typeof document < "u" && document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", c, { once: !0 }) : c();
+    const o = () => d();
+    typeof document < "u" && document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", o, { once: !0 }) : o();
   }
   function y() {
     if (a && (clearTimeout(a), a = null), r)
@@ -117,9 +117,9 @@ function E({ wsUrl: e }) {
         r.onclose = null, r.close();
       } catch {
       }
-    r = null, n = !1, o = "closed", l();
+    r = null, n = !1, c = "closed", l();
   }
-  function b() {
+  function w() {
     try {
       localStorage.setItem("aw_devctl", "1");
     } catch {
@@ -136,12 +136,12 @@ function E({ wsUrl: e }) {
   return {
     start: g,
     stop: y,
-    enable: b,
+    enable: w,
     disable: S,
     isEnabled: p,
-    getState: () => o,
-    onStateChange(c) {
-      return i.add(c), () => i.delete(c);
+    getState: () => c,
+    onStateChange(o) {
+      return i.add(o), () => i.delete(o);
     }
   };
 }
@@ -149,17 +149,17 @@ function k(e) {
   const n = E({ wsUrl: e.app.wsUrl });
   n.isEnabled() && n.start(), e.onDispose(() => n.stop());
   function r() {
-    const [t, a] = e.React.useState(n.isEnabled()), [o, i] = e.React.useState(n.getState());
+    const [t, a] = e.React.useState(n.isEnabled()), [c, i] = e.React.useState(n.getState());
     e.React.useEffect(() => n.onStateChange((s) => {
       a(s.enabled), i(s.state);
     }), []);
-    const l = t ? o === "open" ? "#22c55e" : o === "connecting" ? "#eab308" : "#ef4444" : "inherit";
+    const l = t ? c === "open" ? "#22c55e" : c === "connecting" ? "#eab308" : "#ef4444" : "inherit";
     return e.h(
       "button",
       {
         type: "button",
         onClick: () => t ? n.disable() : n.enable(),
-        title: `Remote dev channel — ${t ? "enabled, " + o : "disabled"}`,
+        title: t ? `Remote dev channel — enabled, ${c}. Turn it off to stop.` : "Turn it on and ask the agent to interact with your UI",
         style: {
           color: l,
           background: "transparent",
