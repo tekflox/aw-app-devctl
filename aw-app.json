@@ -29,7 +29,7 @@
     "routes:register",
     "routes:local",
     "ui:code",
-    "ui:slots:core.nav"
+    "ui:slots:core.nav.right"
   ],
   "contributes": {
     "routes": [

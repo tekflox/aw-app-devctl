@@ -19,8 +19,11 @@ export function register(host) {
   if (client.isEnabled()) client.start();
   host.onDispose(() => client.stop());
 
-  // [dev] pill in the top nav — toggles the relay on/off, shows connection
-  // state (green=open, yellow=connecting, red/gray=closed|error).
+  // [dev] pill in the top-right nav (core.nav.right, next to the mic) —
+  // toggles the relay on/off, shows connection state (green=open,
+  // yellow=connecting, red/gray=closed|error). Fixed width + the state dot
+  // as its own always-present span (opacity toggled, not conditionally
+  // appended text) so state changes never shift neighboring icons.
   function DevTogglePill() {
     const [enabled, setEnabled] = host.React.useState(client.isEnabled());
     const [state, setState] = host.React.useState(client.getState());
@@ -35,13 +38,17 @@ export function register(host) {
         type: 'button',
         onClick: () => (enabled ? client.disable() : client.enable()),
         title: `Remote dev channel — ${enabled ? 'enabled, ' + state : 'disabled'}`,
-        style: { color, background: 'transparent', border: 'none', cursor: 'pointer',
-                 fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' },
+        style: {
+          color, background: 'transparent', border: 'none', cursor: 'pointer',
+          fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em',
+          width: '32px', flexShrink: 0, textAlign: 'left',
+        },
       },
-      enabled ? 'dev•' : 'dev',
+      'dev',
+      host.h('span', { style: { opacity: enabled ? 1 : 0 } }, '•'),
     );
   }
-  host.registerSlot('core.nav', DevTogglePill, { id: `${host.slug}:nav-toggle` });
+  host.registerSlot('core.nav.right', DevTogglePill, { id: `${host.slug}:nav-toggle` });
 }
 
 export default register;

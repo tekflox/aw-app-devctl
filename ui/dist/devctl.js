@@ -18,7 +18,7 @@ function f(e, n) {
       _element: e.tagName,
       id: e.id || void 0,
       class: e.className || void 0,
-      attrs: Array.from(e.attributes || []).reduce((t, c) => (t[c.name] = c.value, t), {}),
+      attrs: Array.from(e.attributes || []).reduce((t, a) => (t[a.name] = a.value, t), {}),
       rect: (() => {
         try {
           const t = e.getBoundingClientRect();
@@ -31,12 +31,12 @@ function f(e, n) {
     };
   if (Array.isArray(e)) return e.slice(0, 100).map((t) => f(t, n + 1));
   try {
-    const t = {}, c = Object.keys(e).slice(0, 100);
-    for (const o of c)
+    const t = {}, a = Object.keys(e).slice(0, 100);
+    for (const o of a)
       try {
         t[o] = f(e[o], n + 1);
-      } catch (l) {
-        t[o] = "[err:" + l.message + "]";
+      } catch (i) {
+        t[o] = "[err:" + i.message + "]";
       }
     return t;
   } catch {
@@ -46,25 +46,25 @@ function f(e, n) {
 async function h(e) {
   const n = performance && performance.now ? performance.now() : Date.now();
   try {
-    const t = await new Function("return (async () => { " + e + " })()")(), c = Math.round((performance && performance.now ? performance.now() : Date.now()) - n);
-    return { result: f(t), ms: c };
+    const t = await new Function("return (async () => { " + e + " })()")(), a = Math.round((performance && performance.now ? performance.now() : Date.now()) - n);
+    return { result: f(t), ms: a };
   } catch (r) {
     const t = Math.round((performance && performance.now ? performance.now() : Date.now()) - n);
     return { error: String(r && r.stack || r && r.message || r), ms: t };
   }
 }
 function E({ wsUrl: e }) {
-  let n = !1, r = null, t = 1e3, c = null, o = "closed";
-  const l = /* @__PURE__ */ new Set();
-  function i() {
-    for (const a of l)
+  let n = !1, r = null, t = 1e3, a = null, o = "closed";
+  const i = /* @__PURE__ */ new Set();
+  function l() {
+    for (const c of i)
       try {
-        a({ enabled: p(), state: o });
+        c({ enabled: p(), state: o });
       } catch {
       }
   }
-  function s(a) {
-    o = a === "hello" ? "open" : a, i();
+  function s(c) {
+    o = c === "hello" ? "open" : c, l();
   }
   function d() {
     s("connecting");
@@ -76,10 +76,10 @@ function E({ wsUrl: e }) {
     }
     r.addEventListener("open", () => {
       s("open"), t = 1e3;
-    }), r.addEventListener("message", async (a) => {
+    }), r.addEventListener("message", async (c) => {
       let u;
       try {
-        u = JSON.parse(a.data);
+        u = JSON.parse(c.data);
       } catch {
         return;
       }
@@ -101,30 +101,30 @@ function E({ wsUrl: e }) {
     });
   }
   function m() {
-    c && clearTimeout(c), c = setTimeout(() => {
+    a && clearTimeout(a), a = setTimeout(() => {
       n && d();
     }, t), t = Math.min(t * 2, 3e4);
   }
   function g() {
     if (n) return;
     n = !0;
-    const a = () => d();
-    typeof document < "u" && document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", a, { once: !0 }) : a();
+    const c = () => d();
+    typeof document < "u" && document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", c, { once: !0 }) : c();
   }
   function y() {
-    if (c && (clearTimeout(c), c = null), r)
+    if (a && (clearTimeout(a), a = null), r)
       try {
         r.onclose = null, r.close();
       } catch {
       }
-    r = null, n = !1, o = "closed", i();
+    r = null, n = !1, o = "closed", l();
   }
   function b() {
     try {
       localStorage.setItem("aw_devctl", "1");
     } catch {
     }
-    n = !1, g(), i();
+    n = !1, g(), l();
   }
   function S() {
     try {
@@ -140,8 +140,8 @@ function E({ wsUrl: e }) {
     disable: S,
     isEnabled: p,
     getState: () => o,
-    onStateChange(a) {
-      return l.add(a), () => l.delete(a);
+    onStateChange(c) {
+      return i.add(c), () => i.delete(c);
     }
   };
 }
@@ -149,11 +149,11 @@ function k(e) {
   const n = E({ wsUrl: e.app.wsUrl });
   n.isEnabled() && n.start(), e.onDispose(() => n.stop());
   function r() {
-    const [t, c] = e.React.useState(n.isEnabled()), [o, l] = e.React.useState(n.getState());
+    const [t, a] = e.React.useState(n.isEnabled()), [o, i] = e.React.useState(n.getState());
     e.React.useEffect(() => n.onStateChange((s) => {
-      c(s.enabled), l(s.state);
+      a(s.enabled), i(s.state);
     }), []);
-    const i = t ? o === "open" ? "#22c55e" : o === "connecting" ? "#eab308" : "#ef4444" : "inherit";
+    const l = t ? o === "open" ? "#22c55e" : o === "connecting" ? "#eab308" : "#ef4444" : "inherit";
     return e.h(
       "button",
       {
@@ -161,19 +161,23 @@ function k(e) {
         onClick: () => t ? n.disable() : n.enable(),
         title: `Remote dev channel — ${t ? "enabled, " + o : "disabled"}`,
         style: {
-          color: i,
+          color: l,
           background: "transparent",
           border: "none",
           cursor: "pointer",
           fontSize: "10px",
           textTransform: "uppercase",
-          letterSpacing: "0.05em"
+          letterSpacing: "0.05em",
+          width: "32px",
+          flexShrink: 0,
+          textAlign: "left"
         }
       },
-      t ? "dev•" : "dev"
+      "dev",
+      e.h("span", { style: { opacity: t ? 1 : 0 } }, "•")
     );
   }
-  e.registerSlot("core.nav", r, { id: `${e.slug}:nav-toggle` });
+  e.registerSlot("core.nav.right", r, { id: `${e.slug}:nav-toggle` });
 }
 export {
   k as default,
