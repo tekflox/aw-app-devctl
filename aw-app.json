@@ -41,16 +41,6 @@
         ]
       }
     ],
-    "windows": [
-      {
-        "id": "devctl.main",
-        "title": "DevCtl",
-        "body": {
-          "type": "declarative",
-          "spec": "windows/main.json"
-        }
-      }
-    ],
     "frontend": {
       "mode": "component",
       "bundle": "ui/dist/devctl.js"

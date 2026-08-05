@@ -20,10 +20,13 @@ against that same CDP endpoint, not to run its own browser.
 
 ## Status: scaffold
 
-- `aw-app.json` — manifest, `id: devctl`, `tier: inprocess`. Contributes a
-  `windows` entry only (**no `nav` entry, deliberately** — see "Why no
-  Workspace nav" below), so the app shows up as a card in the Apps grid with
-  a default window, the same shape as `aw-app-browser`'s manifest.
+- `aw-app.json` — manifest, `id: devctl`, `tier: inprocess`. No `windows`
+  entry (removed 2026-08-05 — it was a single static-markdown "about" page
+  with no real interactivity, which made the app show up as a dead-end
+  clickable tile in the Apps grid's "visual" section like `aw-app-browser`,
+  instead of the compact command-only list `has_windows: false` apps like
+  MCP Tools get). The app's real UI is the `[dev]` toggle pill registered
+  imperatively into `core.nav.right` by `ui/src/plugin.js` — see below.
 - `devctl_app/plugin.py` — `DevctlAppPlugin.activate(ctx)` registers the
   routes sub-app via `ctx.routes` (`routes:register`). That's the only
   capability wired up.
@@ -32,12 +35,11 @@ against that same CDP endpoint, not to run its own browser.
   with a message pointing at the CDP plan. This is the extension point for
   the real feature — TODO comment in the code marks exactly where the CDP
   client call goes.
-- `windows/main.json` — a single markdown widget explaining the scaffold
-  state and the stub endpoint; no real UI yet.
 - `schemas/aw-app.schema.json` — local structural validator (same schema
   used by `aw-app-browser`/`aw-app-node`/`aw-app-git`).
 - `tests/validate_manifest.py` — validates `aw-app.json` against the schema
-  and checks the window spec file exists. Does not claim the app runs.
+  (and any window spec file it references, if `contributes.windows` is ever
+  reintroduced). Does not claim the app runs.
 
 ## Not implemented (out of scope for this scaffold)
 
@@ -50,20 +52,20 @@ against that same CDP endpoint, not to run its own browser.
 ## Why no Workspace nav
 
 `aw-app-browser`'s own history flagged that this kind of app should not
-register itself into `core.nav.workspace` — it belongs in the Apps grid,
-not the Workspace menu. This manifest follows that: `contributes` has
-`windows` but no `nav` entry, matching `aw-app-browser`'s manifest shape
-exactly (compare `repos/aw-app-browser/aw-app.json`).
+register itself into `core.nav.workspace` — it belongs in the Apps grid's
+command-only list (no `windows`, no `nav` entry — see above), not the
+Workspace menu. Its real UI (the `[dev]` toggle) lives in `core.nav.right`
+instead, registered by the component bundle.
 
 ## Layout
 
 ```
-aw-app.json              manifest (tier: inprocess, no nav contribution)
+aw-app.json              manifest (tier: inprocess, no windows/nav contribution)
 README.md                this file
 schemas/aw-app.schema.json   structural validator (same as other apps)
 devctl_app/
   plugin.py               DevctlAppPlugin entrypoint (registers routes only)
   routes.py                build_routes() — one stub endpoint
-windows/main.json         declarative window (markdown stub)
-tests/validate_manifest.py  manifest + window-spec existence check
+ui/src/plugin.js          component-mode entrypoint — registers the [dev] pill
+tests/validate_manifest.py  manifest validation
 ```
