@@ -2,7 +2,7 @@
   "manifest_version": 1,
   "id": "devctl",
   "name": "DevCtl",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Dev-control panel for the workspace: (1) a piloted browser \u2014 observes and controls the aw-app-browser container over CDP (aw-app-browser:9223), live screenshot, screencast over a WebSocket, navigate, click/type/key/scroll, evaluate/inject JS; (2) a tab relay \u2014 remote JS eval into the USER's OWN live browser tab (moved from the aw-workspace monolith, ADR \"Apps Own Their Front + Back Routes\" Decision 5), with a [dev] top-nav toggle and an agent-driven local /eval + /tabs escape hatch. Runs standalone too (Decision 4). Backend routes under /api/apps/devctl; a devctl-browser MCP tool wrapper (piloted-browser navigate/click/type/eval/screenshot) is contributed for agents via mcp.json.",
   "tier": "inprocess",
   "requires_ui_refresh": true,
