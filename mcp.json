@@ -7,7 +7,8 @@
       "args": [
         "-m",
         "mcp_server.devctl_browser"
-      ]
+      ],
+      "cwd": "/opt/aw-workspace/apps/devctl"
     }
   }
 }
