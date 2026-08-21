@@ -37,17 +37,27 @@ Two independent capabilities live in this one sub-app:
    - GET  /tabs     → list currently-connected tabs (local_paths)
    - POST /eval     → {code, user?, timeout?} → run JS in a connected tab,
      return its result (local_paths)
+
+3. **Render** (``render.py``) — a THIRD, independent capability: no side
+   container, no shared browser, just a throwaway Playwright chromium that
+   renders one URL and closes. For any caller (``mini-browser`` today) that
+   wants a screenshot of an arbitrary URL without depending on
+   ``aw-app-browser`` being up at all.
+   - POST /render/screenshot {url, width?, height?, scale?, full_page?,
+     wait_ms?} → PNG bytes
 """
 
 from __future__ import annotations
 
 import json
 
-from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 
 from .cdp import client
 from .relay import relay
+from .render import screenshot_url
 
 
 def build_routes() -> FastAPI:
@@ -191,5 +201,24 @@ def build_routes() -> FastAPI:
             return {"ok": True, **res}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    @app.post("/render/screenshot")
+    async def render_screenshot(body: dict = Body(...)):
+        url = body.get("url")
+        if not url or not url.lower().startswith(("http://", "https://")):
+            raise HTTPException(400, "url must be an absolute http(s) URL")
+        try:
+            png = await run_in_threadpool(
+                screenshot_url,
+                url,
+                int(body.get("width") or 1280),
+                int(body.get("height") or 800),
+                float(body.get("scale") or 1.0),
+                bool(body.get("full_page") or False),
+                int(body.get("wait_ms") or 0),
+            )
+        except Exception as exc:
+            return JSONResponse(status_code=502, content={"error": "render", "detail": str(exc)})
+        return Response(content=png, media_type="image/png")
 
     return app

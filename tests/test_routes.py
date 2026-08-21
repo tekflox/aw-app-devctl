@@ -80,3 +80,12 @@ def test_tab_registers_receives_hello_then_answers_eval():
 
         resp = c.get("/tabs")
         assert resp.json() == {"tabs": []}
+
+
+def test_render_screenshot_requires_absolute_http_url():
+    with _client() as c:
+        resp = c.post("/render/screenshot", json={"url": "not-a-url"})
+        assert resp.status_code == 400
+
+        resp = c.post("/render/screenshot", json={})
+        assert resp.status_code == 400
