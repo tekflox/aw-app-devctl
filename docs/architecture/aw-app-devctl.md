@@ -3,7 +3,7 @@ repo: architecture
 path: docs/architecture/aw-app-devctl.md
 source: generated
 edited: false
-checksum: sha256:e91ad2483916b6299239c96540ebc1ca41bd63d1df3d1860acbcc968124ca620
+checksum: sha256:790a5fa6b73ae32b8e08e0300c3156621e03ac516dd0cc28e0fa047231c4b962
 ---
 # DevCtl
 
@@ -12,7 +12,7 @@ checksum: sha256:e91ad2483916b6299239c96540ebc1ca41bd63d1df3d1860acbcc968124ca62
 - **technologies**: python, react
 - **health** (derived): planned
 
-Dev-control panel for the workspace: (1) a piloted browser — observes and controls the aw-app-browser container over CDP (aw-app-browser:9223), live screenshot, screencast over a WebSocket, navigate, click/type/key/scroll, evaluate/inject JS; (2) a tab relay — remote JS eval into the USER's OWN live browser tab (moved from the aw-workspace monolith, ADR "Apps Own Their Front + Back Routes" Decision 5), with a [dev] top-nav toggle and an agent-driven local /eval + /tabs escape hatch. Runs standalone too (Decision 4). Backend routes under /api/apps/devctl; a devctl-browser MCP tool wrapper (piloted-browser navigate/click/type/eval/screenshot) is contributed for agents via mcp.json.
+Dev-control panel for the workspace: (1) a piloted browser — observes and controls the aw-app-browser container over CDP (aw-app-browser:9223), live screenshot, screencast over a WebSocket, navigate, click/type/key/scroll, evaluate/inject JS; (2) a tab relay — remote JS eval into the USER's OWN live browser tab (moved from the aw-workspace monolith, ADR "Apps Own Their Front + Back Routes" Decision 5), with a [dev] top-nav toggle and an agent-driven local /eval + /tabs escape hatch; (3) POST /render/screenshot — a throwaway in-process Playwright chromium that screenshots one arbitrary URL, no side container required (used by aw-app-mini-browser). Runs standalone too (Decision 4). Backend routes under /api/apps/devctl; a devctl-browser MCP tool wrapper (piloted-browser navigate/click/type/eval/screenshot) is contributed for agents via mcp.json.
 
 ## Connections
 - `http` → **aw-workspace** — routes mounted at /api/apps/devctl
