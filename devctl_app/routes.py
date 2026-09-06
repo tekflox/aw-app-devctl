@@ -171,8 +171,7 @@ def build_routes() -> FastAPI:
         user = claims.get("sub") or claims.get("email") or "unknown"
         await websocket.accept()
         ua = websocket.headers.get("user-agent", "")
-        cid = next(relay._conn_ids)
-        relay.tabs[cid] = {"ws": websocket, "user": user, "ua": ua}
+        cid = await relay.register(websocket, user, ua)
         try:
             await websocket.send_text(json.dumps({"cmd": "hello"}))
             while True:
@@ -184,11 +183,11 @@ def build_routes() -> FastAPI:
         except WebSocketDisconnect:
             pass
         finally:
-            relay.tabs.pop(cid, None)
+            await relay.unregister(cid)
 
     @app.get("/tabs")
     async def list_tabs():
-        return {"tabs": relay.list_tabs()}
+        return {"tabs": await relay.list_tabs()}
 
     @app.post("/eval")
     async def eval_in_tab(body: dict = Body(...)):
