@@ -109,7 +109,18 @@ export function createDevctlClient({ wsUrl }) {
         try { ws.send(JSON.stringify({ id: msg.id, ...out })); } catch { /* connection dropped mid-eval */ }
       }
     });
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (event) => {
+      // IdentityGuard closes 4401 (also 4403/4426) when the workspace
+      // session itself is invalid (integrated mode only — standalone mode
+      // has no guard to fail). Auto-reconnecting into that wall would
+      // hot-loop silently forever; stop, and let the host app's
+      // aw-auth-failed listener put the user back at login. No-op if no
+      // one is listening (standalone mode).
+      if (event.code === 4401 || event.code === 4403 || event.code === 4426) {
+        setStatus('unauthorized');
+        try { window.dispatchEvent(new Event('aw-auth-failed')); } catch {}
+        return;
+      }
       setStatus('closed');
       scheduleReconnect();
     });
