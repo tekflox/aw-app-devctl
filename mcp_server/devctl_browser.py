@@ -123,31 +123,42 @@ async def browser_scroll(dy: int = 300) -> str:
 # importing devctl_app.relay.relay directly: this MCP tool runs as its own
 # OS process (spawned per mcp.json), so that singleton would be a fresh,
 # empty one with no visibility into tabs registered on the real server.
+#
 # GET /tabs and POST /eval are declared `local_paths` in aw-app.json (skip
-# identity for a 127.0.0.1 caller) — X-Api-Key is attached best-effort for
-# the case this process is not co-located with the workspace server. ------
+# identity for a caller at 127.0.0.1) — but confirmed live 2026-09-09 that
+# this MCP subprocess does NOT share loopback with the workspace server (a
+# bare 127.0.0.1:AW_PORT call fails with a connection error, reproduced by
+# QA on Kanban card 3d65bf3b-9510-81ca-bfec-ed8e5f1eaa89 3x for tab_list, 1x
+# for tab_eval). So the external published URL + a real X-Api-Key is the
+# path that actually works here, not a "just in case" fallback — mirrors
+# src/cli/local_client.py's own base_url()/_read_env_value(), which exists
+# for exactly this "off-loopback caller" case. ---------------------------
+
+def _read_workspace_env(name: str) -> str | None:
+    value = os.environ.get(name)
+    if value:
+        return value
+    home = os.environ.get("AW_WORKSPACE_HOME") or os.path.join(
+        os.environ.get("AW_WORKSPACE_CONTAINER_DIR", "/opt/aw-workspace"), ".aw-workspace")
+    prefix = f"{name}="
+    try:
+        with open(os.path.join(home, ".env"), "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith(prefix):
+                    return line[len(prefix):].strip()
+    except OSError:
+        pass
+    return None
+
 
 def _devctl_api_url(path: str) -> str:
-    base = os.environ.get("AW_WORKSPACE_API_URL")
-    if not base:
-        base = f"http://127.0.0.1:{os.environ.get('AW_PORT', '9030')}"
+    base = _read_workspace_env("AW_WORKSPACE_API_URL") or \
+        f"http://127.0.0.1:{os.environ.get('AW_PORT', '9030')}"
     return f"{base.rstrip('/')}/api/apps/devctl{path}"
 
 
 def _devctl_api_key() -> str | None:
-    key = os.environ.get("AW_WORKSPACE_API_KEY")
-    if key:
-        return key
-    home = os.environ.get("AW_WORKSPACE_HOME") or os.path.join(
-        os.environ.get("AW_WORKSPACE_CONTAINER_DIR", "/opt/aw-workspace"), ".aw-workspace")
-    try:
-        with open(os.path.join(home, ".env"), "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("AW_WORKSPACE_API_KEY="):
-                    return line.split("=", 1)[1].strip()
-    except OSError:
-        pass
-    return None
+    return _read_workspace_env("AW_WORKSPACE_API_KEY")
 
 
 def _devctl_headers() -> dict:
