@@ -35,8 +35,10 @@ Two independent capabilities live in this one sub-app:
    - WS   /ws/tab   → a browser tab registers here (identity from
      ``websocket.scope["aw_identity"]``, populated by IdentityGuard)
    - GET  /tabs     → list currently-connected tabs (local_paths)
-   - POST /eval     → {code, user?, timeout?} → run JS in a connected tab,
-     return its result (local_paths)
+   - POST /eval     → {code, user?, conn_id?, timeout?} → run JS in a
+     connected tab, return its result (local_paths). ``conn_id`` (from
+     ``GET /tabs``) targets exactly that tab; required whenever more than
+     one tab matches ``user`` — see ``relay._pick_target``.
 
 3. **Render** (``render.py``) — a THIRD, independent capability: no side
    container, no shared browser, just a throwaway Playwright chromium that
@@ -195,7 +197,7 @@ def build_routes() -> FastAPI:
         if not code:
             return JSONResponse(status_code=400, content={"ok": False, "error": "code is required"})
         try:
-            res = await relay.eval(code, user=body.get("user"),
+            res = await relay.eval(code, user=body.get("user"), conn_id=body.get("conn_id"),
                                     timeout=float(body.get("timeout") or 15.0))
             return {"ok": True, **res}
         except Exception as exc:

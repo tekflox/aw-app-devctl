@@ -204,6 +204,49 @@ class TestEvalRelay:
 
         asyncio.run(scenario())
 
+    def test_eval_with_conn_id_reaches_a_tab_owned_by_another_worker(self):
+        """conn_id's cross-worker lookup goes through the Redis mirror (the
+        tab isn't in worker_b's own ``self.tabs``) — the exact path
+        ``_pick_target``'s ``client.exists(self._tab_key(conn_id))`` branch
+        exists for, distinct from the local-dict lookup test_routes.py's
+        same-process tests already cover."""
+        async def scenario():
+            from devctl_app.relay import DevctlRelay
+
+            worker_a = DevctlRelay()  # owns the tab's real WebSocket
+            worker_b = DevctlRelay()  # receives the POST /eval with conn_id
+            await worker_a.start_relay()
+            await worker_b.start_relay()
+
+            ws = _FakeTabWebSocket()
+            cid = await worker_a.register(ws, user="frederico", ua="test-ua")
+            try:
+                async def mirrored_on_b():
+                    return await worker_b._redis().exists(worker_b._tab_key(cid))
+
+                assert await _wait_until(mirrored_on_b), (
+                    "worker A's tab never showed up in the shared Redis "
+                    "registry — conn_id lookup on another worker has "
+                    "nothing to find")
+
+                eval_task = asyncio.create_task(
+                    worker_b.eval("1+1", conn_id=cid, timeout=5.0))
+
+                assert await _wait_until(lambda: len(ws.sent) >= 1)
+                cmd = json.loads(ws.sent[-1])
+                assert cmd["cmd"] == "eval"
+                worker_a._resolve({"id": cmd["id"], "result": 2, "ms": 1})
+
+                result = await asyncio.wait_for(eval_task, timeout=5.0)
+                assert result["conn_id"] == cid
+                assert result["result"] == 2
+            finally:
+                await worker_a.unregister(cid)
+                await worker_a.aclose()
+                await worker_b.aclose()
+
+        asyncio.run(scenario())
+
     def test_eval_relay_timeout_raises_instead_of_a_fake_success(self):
         async def scenario():
             from devctl_app.relay import DevctlRelay

@@ -212,16 +212,19 @@ class DevctlRelay:
 
     # ---- eval -----------------------------------------------------------
 
-    async def eval(self, code: str, user: str | None = None, timeout: float = 15.0) -> dict:
-        """Run ``code`` in the most-recently-connected tab matching ``user``
-        (or any tab if ``user`` is None), across EVERY worker.
+    async def eval(self, code: str, user: str | None = None, conn_id: str | None = None,
+                    timeout: float = 15.0) -> dict:
+        """Run ``code`` in a connected tab, across EVERY worker.
 
-        A tab owned by THIS worker is reached directly. A tab owned by
+        ``conn_id`` (from ``GET /tabs``) targets exactly that tab — required
+        whenever more than one tab matches ``user`` (see ``_pick_target``);
+        with exactly one match, ``conn_id`` is optional and that one tab is
+        used. A tab owned by THIS worker is reached directly. A tab owned by
         another worker is reached over the Redis relay — see the module
         docstring; if the relay never came up (Redis unreachable), only
         this worker's own tabs are visible.
         """
-        target = await self._pick_target(user)
+        target = await self._pick_target(user, conn_id)
         if target is None:
             raise RuntimeError("no connected tab" + (f" for user {user}" if user else ""))
         conn_id, t = target
@@ -229,9 +232,40 @@ class DevctlRelay:
             return await self._eval_local(conn_id, t, code, timeout)
         return await self._eval_remote(conn_id, code, timeout)
 
-    async def _pick_target(self, user: str | None) -> tuple[str, dict | None] | None:
-        candidates: list[tuple[float, str, dict | None]] = [
-            (t["connected_at"], cid, t) for cid, t in self.tabs.items()
+    async def _pick_target(self, user: str | None,
+                            conn_id: str | None = None) -> tuple[str, dict | None] | None:
+        """Resolve which tab an eval targets.
+
+        ``conn_id`` given: look it up directly (local dict, then the Redis
+        mirror) and error if it is not currently connected — the caller
+        asked for a specific tab, so silently falling back to a different
+        one would repeat the exact incident (2026-09-09, Kanban card
+        3d65bf3b-9510-81ca-bfec-ed8e5f1eaa89) this parameter exists to fix.
+
+        ``conn_id`` omitted: auto-pick only when there is exactly ONE tab
+        matching ``user`` — the previous "most recently connected wins"
+        behaviour silently hit a stale tab whenever a second one was
+        connected. With 2+ candidates we now raise, listing them, instead
+        of guessing.
+        """
+        if conn_id is not None:
+            t = self.tabs.get(conn_id)
+            if t is not None:
+                return conn_id, t
+            if self._share:
+                try:
+                    client = self._redis()
+                    if client is not None and await client.exists(self._tab_key(conn_id)):
+                        return conn_id, None
+                except Exception:
+                    log.debug("devctl: could not consult the shared tab registry "
+                              "for conn_id %s", conn_id, exc_info=True)
+            raise RuntimeError(
+                f"tab {conn_id} is not connected — call GET /tabs for the current list")
+
+        candidates: list[dict] = [
+            {"conn_id": cid, "user": t["user"], "ua": t.get("ua", ""), "t": t}
+            for cid, t in self.tabs.items()
             if user is None or t["user"] == user
         ]
         if self._share:
@@ -239,9 +273,10 @@ class DevctlRelay:
                 client = self._redis()
                 if client is not None:
                     prefix = self._tab_key_prefix()
+                    known = {c["conn_id"] for c in candidates}
                     async for key in client.scan_iter(match=f"{prefix}*"):
                         cid = key[len(prefix):]
-                        if cid in self.tabs:
+                        if cid in known:
                             continue  # already covered by the local loop above
                         raw = await client.get(key)
                         if not raw:
@@ -252,15 +287,21 @@ class DevctlRelay:
                             continue
                         if user is not None and data.get("user") != user:
                             continue
-                        candidates.append((data.get("connected_at", 0), cid, None))
+                        candidates.append({"conn_id": cid, "user": data.get("user", "unknown"),
+                                            "ua": data.get("ua", ""), "t": None})
             except Exception:
                 log.debug("devctl: could not consult the shared tab registry "
                           "for eval target selection", exc_info=True)
         if not candidates:
             return None
-        candidates.sort(key=lambda c: c[0])
-        _connected_at, conn_id, t = candidates[-1]
-        return conn_id, t
+        if len(candidates) > 1:
+            listing = ", ".join(f"{c['conn_id']} ({c['user']}, {c['ua'] or 'unknown ua'})"
+                                 for c in candidates)
+            raise RuntimeError(
+                f"{len(candidates)} tabs connected" + (f" for user {user}" if user else "") +
+                f" — pass conn_id to pick one: {listing}")
+        c = candidates[0]
+        return c["conn_id"], c["t"]
 
     async def _eval_local(self, conn_id: str, t: dict, code: str, timeout: float) -> dict:
         req_id = next(self._req_ids)

@@ -1,10 +1,16 @@
-"""DevCtl browser MCP — the agent-facing tool surface for the piloted browser.
+"""DevCtl browser MCP — the agent-facing tool surface for the piloted browser
+and the tab relay.
 
 Wraps `devctl_app.cdp` (CDP control of the aw-app-browser container) as MCP
 tools so an agent can take action: navigate, click, type, press keys, scroll,
 evaluate/inject JS (DOM control), and screenshot. No dependency on the browser
 being active — every call goes through `ensure_browser()`, which starts the
 container and opens a page if needed.
+
+`tab_list`/`tab_eval` are a separate, unrelated capability: devctl_app's tab
+relay (a registry of the USER's own live browser tabs, see routes.py's
+module docstring) reached over HTTP rather than CDP — see the comment above
+those two tools for why.
 
 Registration: wired into the aw-workspace mcp-gateway via this app's
 ``mcp.json`` (``contributes.mcp`` in ``aw-app.json`` signals it). The gateway
@@ -25,6 +31,8 @@ import base64
 import os
 import sys
 import time
+
+import httpx
 
 # Allow running from the app root so `devctl_app` is importable.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -106,6 +114,74 @@ async def browser_scroll(dy: int = 300) -> str:
     """Wheel-scroll by dy pixels. Returns a screenshot path."""
     await client.scroll(dy)
     return _save_png(await client.screenshot())
+
+
+# ---- Tab relay (a DIFFERENT capability from the piloted browser above:
+# devctl_app/relay.py's cross-worker registry of the USER's own live
+# browser tabs, driven by ui/src/client.js's [dev] toggle — see
+# devctl_app/routes.py's module docstring). Reached over HTTP, not by
+# importing devctl_app.relay.relay directly: this MCP tool runs as its own
+# OS process (spawned per mcp.json), so that singleton would be a fresh,
+# empty one with no visibility into tabs registered on the real server.
+# GET /tabs and POST /eval are declared `local_paths` in aw-app.json (skip
+# identity for a 127.0.0.1 caller) — X-Api-Key is attached best-effort for
+# the case this process is not co-located with the workspace server. ------
+
+def _devctl_api_url(path: str) -> str:
+    base = os.environ.get("AW_WORKSPACE_API_URL")
+    if not base:
+        base = f"http://127.0.0.1:{os.environ.get('AW_PORT', '9030')}"
+    return f"{base.rstrip('/')}/api/apps/devctl{path}"
+
+
+def _devctl_api_key() -> str | None:
+    key = os.environ.get("AW_WORKSPACE_API_KEY")
+    if key:
+        return key
+    home = os.environ.get("AW_WORKSPACE_HOME") or os.path.join(
+        os.environ.get("AW_WORKSPACE_CONTAINER_DIR", "/opt/aw-workspace"), ".aw-workspace")
+    try:
+        with open(os.path.join(home, ".env"), "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("AW_WORKSPACE_API_KEY="):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
+def _devctl_headers() -> dict:
+    key = _devctl_api_key()
+    return {"X-Api-Key": key} if key else {}
+
+
+@mcp.tool()
+async def tab_list() -> dict:
+    """List every browser tab currently connected to devctl's tab relay —
+    conn_id, user, ua — across every worker. Call this BEFORE tab_eval
+    whenever more than one tab might be connected for the same user:
+    tab_eval requires an explicit conn_id in that case instead of guessing
+    which tab you meant (a stale tab silently receiving eval commands meant
+    for a different one is exactly the failure this is for)."""
+    async with httpx.AsyncClient(timeout=10.0) as c:
+        resp = await c.get(_devctl_api_url("/tabs"), headers=_devctl_headers())
+    return resp.json()
+
+
+@mcp.tool()
+async def tab_eval(code: str, conn_id: str | None = None, user: str | None = None,
+                    timeout: float = 15.0) -> dict:
+    """Run JS in a connected browser tab via devctl's tab relay — the
+    USER's own live tab (opted in via the [dev] toggle), NOT the piloted
+    CDP browser (`browser_eval` above is that). Pass `conn_id` (from
+    `tab_list`) to target a specific tab; it is required whenever more than
+    one tab is connected for `user` (or at all, if `user` is omitted) — the
+    call errors with the candidate list instead of guessing which one you
+    meant."""
+    body = {"code": code, "conn_id": conn_id, "user": user, "timeout": timeout}
+    async with httpx.AsyncClient(timeout=timeout + 5.0) as c:
+        resp = await c.post(_devctl_api_url("/eval"), json=body, headers=_devctl_headers())
+    return resp.json()
 
 
 if __name__ == "__main__":
