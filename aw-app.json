@@ -30,6 +30,7 @@
   "permissions": [
     "routes:register",
     "routes:local",
+    "state:own",
     "ui:code",
     "ui:slots:core.nav.right"
   ],

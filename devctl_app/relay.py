@@ -24,8 +24,18 @@ added is:
   uses for the BYOD ``/link`` tunnel. The result is published back on a
   request-id-scoped topic that only the ORIGINATING worker is waiting on.
 
-Both are strictly additive: with ``share=False`` (or Redis unreachable) this
-degrades to the original worker-local-only behaviour.
+Both are strictly additive: with ``share=False`` (or no ``ctx`` — see
+``set_context``) this degrades to the original worker-local-only behaviour.
+
+**Migrated off a direct ``src.libs.redis_coord`` import onto
+``ctx.state`` (2026-10-19, Kanban 3fe5bf3b-9510-81d6-bab5-f69e1580ba40,
+``docs/standards/app-shared-state.md``).** The tab registry is
+``ctx.state.kv`` (a TTL'd put/get/scan — exactly the mirror shape above);
+the eval relay is ``ctx.state.broadcast`` for both topics, via
+``_CtxBroadcastAdapter``. Standalone mode (ADR Decision 4,
+``devctl_app/__main__.py``) never calls ``set_context`` — a single process
+has no cross-worker gap to close, so that mode's existing degrade-to-local
+posture needs no raw Redis fallback at all.
 """
 
 from __future__ import annotations
@@ -39,15 +49,48 @@ import uuid
 
 log = logging.getLogger("aw_apps.devctl.relay")
 
-#: How long a tab's Redis-mirrored entry survives without a heartbeat
-#: refresh — a few missed heartbeats' worth of slack past _HEARTBEAT_INTERVAL_S,
-#: so a slow Redis blip doesn't make a live tab flicker out of /tabs.
+#: How long a tab's kv entry survives without a heartbeat refresh — a few
+#: missed heartbeats' worth of slack past _HEARTBEAT_INTERVAL_S, so a slow
+#: Redis blip doesn't make a live tab flicker out of /tabs.
 _TAB_TTL_S = 30
 _HEARTBEAT_INTERVAL_S = 10
 
-#: RedisBroadcaster topics for the cross-worker eval relay.
+#: Bare local topic names ``ctx.state.broadcast`` namespaces under this
+#: app's own id, and the full topic labels threaded through
+#: ``_on_relay_message`` (unchanged — it dispatches by content, same as
+#: before migration).
 _EVAL_CMD_TOPIC = "devctl:evalcmd"
 _EVAL_RESP_TOPIC = "devctl:evalresp"
+_EVAL_CMD_BARE = "evalcmd"
+_EVAL_RESP_BARE = "evalresp"
+
+
+class _CtxBroadcastAdapter:
+    """Adapts ``ctx.state.broadcast`` (per-topic publish/subscribe,
+    ``state:own``) to the single ``start_relay(handler)`` /
+    ``publish(topic, payload)`` / ``stop()`` interface this module's
+    ``_on_relay_message(topic, payload)`` already speaks — it dispatches
+    by content across BOTH eval topics, same as the raw
+    ``RedisBroadcaster`` (one PSUBSCRIBE-everything relay) it replaces.
+    """
+
+    #: full topic label -> bare local name ``ctx.state.broadcast`` uses.
+    _TOPICS = {_EVAL_CMD_TOPIC: _EVAL_CMD_BARE, _EVAL_RESP_TOPIC: _EVAL_RESP_BARE}
+
+    def __init__(self, ctx) -> None:
+        self._ctx = ctx
+
+    async def start_relay(self, handler) -> None:
+        for full_topic, bare in self._TOPICS.items():
+            async def _dispatch(payload: dict, _t=full_topic) -> None:
+                await handler(_t, payload)
+            await self._ctx.state.broadcast.subscribe(bare, _dispatch)
+
+    async def publish(self, topic: str, payload: dict) -> None:
+        await self._ctx.state.broadcast.publish(self._TOPICS[topic], payload)
+
+    async def stop(self) -> None:
+        await self._ctx.state.broadcast.aclose()
 
 
 class DevctlRelay:
@@ -58,30 +101,36 @@ class DevctlRelay:
         self._req_ids = itertools.count(1)
         # Off for unit tests that want purely local, Redis-free behaviour.
         self._share = share
-        self._client = None
+        self._ctx = None
         self._broadcaster = None
         self._relay_up = False
         self._heartbeats: dict[str, asyncio.Task] = {}
 
     # ---- lifecycle ----------------------------------------------------
 
+    def set_context(self, ctx) -> None:
+        """Wire this relay to the app's real ``ctx`` (``state:own``) —
+        called once from ``plugin.activate`` before ``start_relay``.
+        Standalone mode (ADR Decision 4) never calls this; ``self._ctx``
+        stays ``None`` and sharing degrades to this worker's own tabs."""
+        self._ctx = ctx
+
     async def start_relay(self) -> None:
         """Start the cross-worker eval relay. Never raises: with no
-        reachable Redis, every method below degrades to this worker's own
-        tabs only — the same posture as every other relay in this codebase
+        ``ctx`` (``set_context`` never called, or ``state:own`` not
+        granted), every method below degrades to this worker's own tabs
+        only — the same posture as every other relay in this codebase
         (see ``InstallJobs.start_relay``)."""
-        if not self._share:
+        if not self._share or self._ctx is None:
             return
         try:
-            from src.libs.redis_coord import RedisBroadcaster
-
-            self._broadcaster = RedisBroadcaster()
+            self._broadcaster = _CtxBroadcastAdapter(self._ctx)
             await self._broadcaster.start_relay(self._on_relay_message)
             self._relay_up = True
         except Exception:
             log.warning(
-                "devctl: could not start the tab-relay Redis pub/sub — /tabs "
-                "and /eval will only see this worker's own tabs until "
+                "devctl: could not start the tab-relay over ctx.state.broadcast — "
+                "/tabs and /eval will only see this worker's own tabs until "
                 "restarted (harmless at AW_WORKSPACE_WORKERS=1)", exc_info=True)
 
     async def aclose(self) -> None:
@@ -93,34 +142,10 @@ class DevctlRelay:
                 await self._broadcaster.stop()
             except Exception:  # noqa: BLE001 — shutdown path
                 pass
-        if self._client is not None:
-            try:
-                await self._client.aclose()
-            except Exception:  # noqa: BLE001 — shutdown path
-                pass
-            self._client = None
 
-    def _redis(self):
-        if not self._share:
-            return None
-        if self._client is None:
-            import redis.asyncio as aioredis
-
-            from src.libs.redis_coord import get_workspace_redis_url
-
-            self._client = aioredis.from_url(get_workspace_redis_url(), decode_responses=True)
-        return self._client
-
-    @staticmethod
-    def _tab_key_prefix() -> str:
-        from src.libs.redis_coord import _key_prefix
-
-        return f"{_key_prefix()}devctl:tab:"
-
-    def _tab_key(self, conn_id: str) -> str:
-        return f"{self._tab_key_prefix()}{conn_id}"
-
-    # ---- tab registration (mirrors InstallJobs' W3 STATE-mirror shape) --
+    # ---- tab registration (mirrors InstallJobs' W3 STATE-mirror shape,
+    # now via ctx.state.kv — conn_id is already a bare lowercase-hex
+    # identifier, valid as a kv name with no further encoding) ------------
 
     async def register(self, ws, user: str | None, ua: str) -> str:
         """Register a newly-connected tab and return its ``conn_id``.
@@ -160,23 +185,22 @@ class DevctlRelay:
         t = self.tabs.get(conn_id)
         if t is None:
             return
+        if self._ctx is None:
+            return
         try:
-            client = self._redis()
-            if client is not None:
-                payload = json.dumps({
-                    "user": t["user"], "ua": t.get("ua", ""), "connected_at": t["connected_at"],
-                })
-                await client.set(self._tab_key(conn_id), payload, ex=_TAB_TTL_S)
+            await self._ctx.state.kv.put(conn_id, {
+                "user": t["user"], "ua": t.get("ua", ""), "connected_at": t["connected_at"],
+            }, ttl=_TAB_TTL_S)
         except Exception:
-            log.debug("devctl: could not mirror tab %s to Redis — /tabs on "
-                      "other workers won't see it until this worker's own "
+            log.debug("devctl: could not mirror tab %s via ctx.state.kv — /tabs "
+                      "on other workers won't see it until this worker's own "
                       "poll answers", conn_id, exc_info=True)
 
     async def _clear_mirror(self, conn_id: str) -> None:
+        if self._ctx is None:
+            return
         try:
-            client = self._redis()
-            if client is not None:
-                await client.delete(self._tab_key(conn_id))
+            await self._ctx.state.kv.delete(conn_id)
         except Exception:
             log.debug("devctl: could not clear the shared tab entry for %s",
                       conn_id, exc_info=True)
@@ -184,27 +208,19 @@ class DevctlRelay:
     async def list_tabs(self) -> list[dict]:
         """This worker's own live tabs (authoritative — they're the ones
         with a real WebSocket behind them) plus any tab another worker has
-        mirrored into Redis, deduplicated by ``conn_id``."""
+        mirrored via ``ctx.state.kv``, deduplicated by ``conn_id``."""
         tabs = {cid: {"conn_id": cid, "user": t["user"], "ua": t.get("ua", "")}
                 for cid, t in self.tabs.items()}
-        if self._share:
+        if self._share and self._ctx is not None:
             try:
-                client = self._redis()
-                if client is not None:
-                    prefix = self._tab_key_prefix()
-                    async for key in client.scan_iter(match=f"{prefix}*"):
-                        cid = key[len(prefix):]
-                        if cid in tabs:
-                            continue
-                        raw = await client.get(key)
-                        if not raw:
-                            continue
-                        try:
-                            data = json.loads(raw)
-                        except ValueError:
-                            continue
-                        tabs[cid] = {"conn_id": cid, "user": data.get("user", "unknown"),
-                                     "ua": data.get("ua", "")}
+                for cid in await self._ctx.state.kv.scan():
+                    if cid in tabs:
+                        continue
+                    data = await self._ctx.state.kv.get(cid)
+                    if not data:
+                        continue
+                    tabs[cid] = {"conn_id": cid, "user": data.get("user", "unknown"),
+                                 "ua": data.get("ua", "")}
             except Exception:
                 log.debug("devctl: could not read the shared tab registry — "
                           "falling back to this worker's own tabs only", exc_info=True)
@@ -252,10 +268,9 @@ class DevctlRelay:
             t = self.tabs.get(conn_id)
             if t is not None:
                 return conn_id, t
-            if self._share:
+            if self._share and self._ctx is not None:
                 try:
-                    client = self._redis()
-                    if client is not None and await client.exists(self._tab_key(conn_id)):
+                    if (await self._ctx.state.kv.get(conn_id)) is not None:
                         return conn_id, None
                 except Exception:
                     log.debug("devctl: could not consult the shared tab registry "
@@ -268,27 +283,19 @@ class DevctlRelay:
             for cid, t in self.tabs.items()
             if user is None or t["user"] == user
         ]
-        if self._share:
+        if self._share and self._ctx is not None:
             try:
-                client = self._redis()
-                if client is not None:
-                    prefix = self._tab_key_prefix()
-                    known = {c["conn_id"] for c in candidates}
-                    async for key in client.scan_iter(match=f"{prefix}*"):
-                        cid = key[len(prefix):]
-                        if cid in known:
-                            continue  # already covered by the local loop above
-                        raw = await client.get(key)
-                        if not raw:
-                            continue
-                        try:
-                            data = json.loads(raw)
-                        except ValueError:
-                            continue
-                        if user is not None and data.get("user") != user:
-                            continue
-                        candidates.append({"conn_id": cid, "user": data.get("user", "unknown"),
-                                            "ua": data.get("ua", ""), "t": None})
+                known = {c["conn_id"] for c in candidates}
+                for cid in await self._ctx.state.kv.scan():
+                    if cid in known:
+                        continue  # already covered by the local loop above
+                    data = await self._ctx.state.kv.get(cid)
+                    if not data:
+                        continue
+                    if user is not None and data.get("user") != user:
+                        continue
+                    candidates.append({"conn_id": cid, "user": data.get("user", "unknown"),
+                                        "ua": data.get("ua", ""), "t": None})
             except Exception:
                 log.debug("devctl: could not consult the shared tab registry "
                           "for eval target selection", exc_info=True)

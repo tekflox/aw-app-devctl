@@ -15,14 +15,23 @@ registered exclusively on instance A must be visible/reachable from
 instance B, since that is exactly the cross-process gap
 ``AW_WORKSPACE_WORKERS=10`` opened up.
 
+**Migrated off a direct ``src.libs.redis_coord`` import onto ``ctx.state``
+(2026-10-19, Kanban 3fe5bf3b-9510-81d6-bab5-f69e1580ba40,
+docs/standards/app-shared-state.md).** Each simulated worker now gets its
+own real ``ctx.state`` (via a minimal ``AppContext``, same construction
+``src/tests/integration/apps/test_state_facade_multiworker.py`` uses to
+prove the facade itself cross-worker), wired in with ``set_context``
+before ``start_relay`` — the same two-independent-instances-over-one-real-
+Redis shape as before, just through the primitive production actually
+uses now instead of a direct ``RedisBroadcaster``/raw client.
+
 Needs BOTH a reachable Redis (``AW_TEST_REDIS_URL`` / ``AW_WORKSPACE_REDIS_URL``
-/ ``AW_REDIS_URL`` — same resolution order ``relay.py`` itself uses) AND
-aw-workspace core's own ``src`` package on ``sys.path``: ``relay.py``'s
-Redis-backed methods lazy-import ``src.libs.redis_coord``, only importable
-when this app is running INSIDE an aw-workspace checkout — not the case in
-this repo's own CI (no aw-workspace checkout, no Redis service), so this
-test skips cleanly there, same posture as its aw-backend/aw-workspace
-precedents skipping without a reachable Redis.
+/ ``AW_REDIS_URL`` — same resolution order ``state_facade.py`` itself uses) AND
+aw-workspace core's own ``src`` package on ``sys.path`` (``AppContext`` /
+``ctx.state`` are only importable when this app is running INSIDE an
+aw-workspace checkout — not the case in this repo's own CI, no aw-workspace
+checkout, no Redis service), so this test skips cleanly there, same posture
+as its aw-backend/aw-workspace precedents skipping without a reachable Redis.
 """
 from __future__ import annotations
 
@@ -39,7 +48,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # devctl_app on sys.path
 
 _WORKSPACE_ROOT = Path(os.environ.get("AW_WORKSPACE_CONTAINER_DIR", "/opt/aw-workspace"))
-if (_WORKSPACE_ROOT / "src" / "libs" / "redis_coord.py").is_file():
+if (_WORKSPACE_ROOT / "src" / "apps" / "base.py").is_file():
     sys.path.insert(0, str(_WORKSPACE_ROOT))
 
 
@@ -53,7 +62,7 @@ def _redis_url() -> str:
 
 def _src_available() -> bool:
     try:
-        import src.libs.redis_coord  # noqa: F401
+        import src.apps.base  # noqa: F401
         return True
     except Exception:
         return False
@@ -78,6 +87,42 @@ pytestmark = [
 
 # Isolate this run's keys from any real workspace sharing the same Redis.
 os.environ["AW_WORKSPACE"] = f"devctl-relay-test-{uuid.uuid4().hex[:8]}"
+
+
+@pytest.fixture(autouse=True)
+def _fresh_state_facade_client():
+    """``ctx.state``'s kv client + breaker are cached at MODULE scope
+    (one Redis connection per worker PROCESS, by design — see
+    ``src/apps/state_facade.py::_get_client``). Each test function here
+    runs its own ``asyncio.run(scenario())``, which opens and then CLOSES
+    its own event loop — a client cached from a previous test's now-closed
+    loop raises ``Event loop is closed`` on first use, trips the breaker
+    for 30s, and silently degrades every kv/broadcast call in whichever
+    test runs next. Same reset ``src/tests/integration/apps/
+    test_state_facade_multiworker.py`` applies for the identical reason.
+    """
+    import src.apps.state_facade as sf
+    sf._client = None
+    sf._breaker = sf._StateBreaker()
+    yield
+
+
+def _fresh_ctx(app_id: str = "devctl"):
+    """A real, minimal ``AppContext`` granted ``state:own`` — one per
+    simulated worker, sharing nothing in Python with the other; only the
+    Redis both their ``ctx.state`` facades resolve to."""
+    from src.apps.base import AppContext
+
+    class _Journal:
+        def record(self, *a, **kw):
+            pass
+
+    class _Runtime:
+        journal = _Journal()
+
+    return AppContext(runtime=_Runtime(), app_id=app_id, version="1.0.0",
+                      granted_permissions=["state:own"], config={},
+                      package_dir="/tmp/" + app_id)
 
 
 class _FakeTabWebSocket:
@@ -116,6 +161,8 @@ class TestTabRegistryRelay:
 
             worker_a = DevctlRelay()
             worker_b = DevctlRelay()
+            worker_a.set_context(_fresh_ctx())
+            worker_b.set_context(_fresh_ctx())
             await worker_a.start_relay()
             await worker_b.start_relay()
 
@@ -146,6 +193,8 @@ class TestTabRegistryRelay:
 
             worker_a = DevctlRelay()
             worker_b = DevctlRelay()
+            worker_a.set_context(_fresh_ctx())
+            worker_b.set_context(_fresh_ctx())
             await worker_a.start_relay()
             await worker_b.start_relay()
 
@@ -176,12 +225,25 @@ class TestEvalRelay:
 
             worker_a = DevctlRelay()  # owns the tab's real WebSocket
             worker_b = DevctlRelay()  # receives the POST /eval
+            worker_a.set_context(_fresh_ctx())
+            worker_b.set_context(_fresh_ctx())
             await worker_a.start_relay()
             await worker_b.start_relay()
 
             ws = _FakeTabWebSocket()
             cid = await worker_a.register(ws, user="frederico", ua="test-ua")
             try:
+                # ctx.state.kv's round trip (capability check, lazy client,
+                # JSON) is slower than the raw redis-py client this used to
+                # go straight to — wait for A's heartbeat mirror to actually
+                # land on B before firing the eval, or a poll this early can
+                # lose the race and find no candidate at all (eval() has no
+                # internal retry).
+                async def seen_on_b():
+                    tabs = await worker_b.list_tabs()
+                    return any(t["conn_id"] == cid for t in tabs)
+                assert await _wait_until(seen_on_b)
+
                 eval_task = asyncio.create_task(
                     worker_b.eval("1+1", user="frederico", timeout=5.0))
 
@@ -215,6 +277,8 @@ class TestEvalRelay:
 
             worker_a = DevctlRelay()  # owns the tab's real WebSocket
             worker_b = DevctlRelay()  # receives the POST /eval with conn_id
+            worker_a.set_context(_fresh_ctx())
+            worker_b.set_context(_fresh_ctx())
             await worker_a.start_relay()
             await worker_b.start_relay()
 
@@ -222,7 +286,10 @@ class TestEvalRelay:
             cid = await worker_a.register(ws, user="frederico", ua="test-ua")
             try:
                 async def mirrored_on_b():
-                    return await worker_b._redis().exists(worker_b._tab_key(cid))
+                    # Via the public API, not relay.py's internals — those
+                    # went away with the migration onto ctx.state.kv.
+                    tabs = await worker_b.list_tabs()
+                    return any(t["conn_id"] == cid for t in tabs)
 
                 assert await _wait_until(mirrored_on_b), (
                     "worker A's tab never showed up in the shared Redis "
@@ -253,6 +320,8 @@ class TestEvalRelay:
 
             worker_a = DevctlRelay()
             worker_b = DevctlRelay()
+            worker_a.set_context(_fresh_ctx())
+            worker_b.set_context(_fresh_ctx())
             await worker_a.start_relay()
             await worker_b.start_relay()
 

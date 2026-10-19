@@ -22,8 +22,10 @@ class DevctlAppPlugin:
         subapp = routes_mod.build_routes()
         ctx.routes.register(subapp)
         # Cross-worker tab relay (AW_WORKSPACE_WORKERS>1) — see relay.py.
-        # Awaited, not fire-and-forget, so a publish from this worker never
-        # races its own subscribe.
+        # set_context before start_relay: the relay needs ctx.state wired
+        # up before it tries to use it. Awaited, not fire-and-forget, so a
+        # publish from this worker never races its own subscribe.
+        relay.set_context(ctx)
         await relay.start_relay()
         log.info("aw-app-devctl activated (scaffold)")
 
