@@ -20,3 +20,5 @@ Install the app and open the developer control entry from the workspace navigati
 ## What It Delivers
 
 The app gives developers and agents a practical control surface for browser-based work. It makes inspection and interaction faster without requiring a separate debugging setup.
+
+<!-- fleet migration batch 5: CI loop verification no-op -->
