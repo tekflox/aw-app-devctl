@@ -3,3 +3,6 @@ __pycache__/
 .pytest_cache/
 ui/node_modules/
 ui/dist/
+
+# Generated from mcp.template.json by aw-workspace on every activation.
+mcp.json

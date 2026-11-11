@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "devctl-browser": {
+      "enabled": true,
+      "type": "stdio",
+      "command": "python3",
+      "args": [
+        "-m",
+        "mcp_server.devctl_browser"
+      ],
+      "cwd": "/opt/aw-workspace/apps/devctl",
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "AW_WORKSPACE_API_URL": "${env.AW_WORKSPACE_API_URL}",
+        "AW_WORKSPACE_API_KEY": "${env.AW_WORKSPACE_API_KEY}"
+      }
+    }
+  }
+}

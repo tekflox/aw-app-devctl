@@ -107,9 +107,10 @@ def test_eval_with_two_tabs_and_no_conn_id_errors_with_candidates():
 
 
 def test_eval_with_explicit_conn_id_hits_the_right_tab():
-    # Two tabs connected (the real-world case: a stale tab + the one the
-    # operator actually wants) — conn_id must pin the eval to tab B, never
-    # falling back to tab A even though A connected first.
+    # Two tabs connected, B last — the old "most-recently-connected-wins"
+    # auto-pick would land on B. conn_id explicitly targets A instead, so
+    # the test only passes if conn_id genuinely overrides that default
+    # rather than coincidentally agreeing with it.
     with _client() as c:
         with c.websocket_connect("/ws/tab") as ws_a:
             ws_a.receive_json()
@@ -119,27 +120,26 @@ def test_eval_with_explicit_conn_id_hits_the_right_tab():
                 ws_b.receive_json()
                 tabs = c.get("/tabs").json()["tabs"]
                 assert len(tabs) == 2
-                conn_id_b = next(t["conn_id"] for t in tabs if t["conn_id"] != conn_id_a)
 
                 result = {}
 
                 def do_eval():
                     result["resp"] = c.post(
-                        "/eval", json={"code": "return 1", "conn_id": conn_id_b})
+                        "/eval", json={"code": "return 1", "conn_id": conn_id_a})
 
                 t = threading.Thread(target=do_eval)
                 t.start()
 
-                eval_msg = ws_b.receive_json()
+                eval_msg = ws_a.receive_json()
                 assert eval_msg["cmd"] == "eval"
-                ws_b.send_text(json.dumps({"id": eval_msg["id"], "result": 99, "ms": 1}))
+                ws_a.send_text(json.dumps({"id": eval_msg["id"], "result": 99, "ms": 1}))
 
                 t.join(timeout=5)
                 resp = result["resp"]
                 assert resp.status_code == 200
                 body = resp.json()
                 assert body["ok"] is True
-                assert body["conn_id"] == conn_id_b
+                assert body["conn_id"] == conn_id_a
                 assert body["result"] == 99
 
         resp = c.get("/tabs")
